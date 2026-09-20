@@ -46,6 +46,11 @@ body{
   display:flex;align-items:center;gap:6px;
 }
 .name-tag .paw{font-size:15px}
+.mood-wrap{display:flex;align-items:center;gap:8px}
+.snd{width:36px;height:36px;border-radius:50%;background:var(--card);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
+  box-shadow:0 2px 8px rgba(138,106,79,.12);transition:transform .1s}
+.snd:active{transform:scale(.85)}
 .mood{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);
   border-radius:999px;padding:6px 12px;box-shadow:0 2px 8px rgba(138,106,79,.12)}
 .mood-face{font-size:16px}
@@ -69,6 +74,12 @@ body{
 .bubble::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
   border:8px solid transparent;border-top-color:#fff;border-top-width:10px}
 .bubble.show{opacity:1}
+.dream{position:absolute;bottom:96%;right:4%;width:42px;height:42px;border-radius:50%;
+  background:#fff;border:2px solid var(--amber2);display:flex;align-items:center;justify-content:center;
+  font-size:22px;opacity:0;pointer-events:none;transition:opacity .3s;
+  box-shadow:0 4px 12px rgba(138,106,79,.2)}
+.dream.show{opacity:1;animation:dreamfloat 2s ease-in-out infinite}
+@keyframes dreamfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
 .pet{position:relative;cursor:grab;touch-action:none;transition:transform .2s ease}
 .pet:active{cursor:grabbing}
 .pet img{display:block;height:min(300px,42vh);width:auto;
@@ -77,6 +88,9 @@ body{
 .pet.drag{transform:scale(.94)}
 .pet.sad img{filter:grayscale(.9) brightness(.92) drop-shadow(0 10px 14px rgba(90,70,50,.22))}
 .pet.flip img{transform:scaleX(-1)}
+.pet.angry{animation:angry .38s ease-in-out infinite}
+.pet.angry img{filter:drop-shadow(0 10px 14px rgba(180,40,40,.38)) hue-rotate(-20deg) saturate(1.8)}
+@keyframes angry{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px) rotate(-2deg)}75%{transform:translateX(4px) rotate(2deg)}}
 .shadow{width:min(180px,46vw);height:16px;border-radius:50%;background:radial-gradient(ellipse,rgba(138,106,79,.20),transparent 70%);
   margin-top:6px;animation:shadowpulse 3s ease-in-out infinite}
 @keyframes shadowpulse{0%,100%{transform:scale(1);opacity:.9}50%{transform:scale(.82);opacity:.55}}
@@ -137,6 +151,7 @@ body{
   .btn i{font-size:20px}
   .btn em{font-size:10px}
   .name-tag{font-size:13px}
+  .mood-bar{width:52px}
 }
 </style>
 </head>
@@ -145,17 +160,21 @@ body{
 
 <header class="topbar">
   <div class="name-tag" id="nameTag" title="点我改名"><span class="paw">🐻</span><span id="nameText">松松</span></div>
-  <div class="mood">
-    <span class="mood-face" id="moodFace">😊</span>
-    <div class="mood-bar"><div class="mood-fill" id="moodFill"></div></div>
-    <span class="mood-num" id="moodNum">80</span>
+  <div class="mood-wrap">
+    <div class="snd" id="sndBtn" title="音效开关">🔊</div>
+    <div class="mood">
+      <span class="mood-face" id="moodFace">😊</span>
+      <div class="mood-bar"><div class="mood-fill" id="moodFill"></div></div>
+      <span class="mood-num" id="moodNum">80</span>
+    </div>
   </div>
 </header>
 
-<div class="tip" id="tip">点我摸摸 · 点地面我能走过去 · 按住拖动 · 下方按钮陪我玩</div>
+<div class="tip" id="tip">点我摸摸 · 连点我会转晕/生气 · 点地面走过去 · 右上🔊开关音效</div>
 
 <div class="wrap" id="wrap">
   <div class="bubble" id="bubble"><span id="bubbleText">你好呀~</span></div>
+  <div class="dream" id="dream">💤</div>
   <div class="pet idle" id="pet">
     <img id="petImg" alt="轻松熊">
     <div class="fx" id="fx"></div>
@@ -191,6 +210,7 @@ body{
   ];
   var FOODS=['🍯','🍡','🍓','🍪','🧁','🍎','🍮'];
   var NOTES=['♪','♫','🎵','🎶'];
+  var DREAM=['💤','🌙','⭐','🍯','💭','🎵'];
 
   var wrap=document.getElementById('wrap');
   var pet=document.getElementById('pet');
@@ -198,16 +218,47 @@ body{
   var fx=document.getElementById('fx');
   var bubble=document.getElementById('bubble');
   var bubbleText=document.getElementById('bubbleText');
+  var dream=document.getElementById('dream');
   var moodFill=document.getElementById('moodFill');
   var moodNum=document.getElementById('moodNum');
   var moodFace=document.getElementById('moodFace');
   var nameText=document.getElementById('nameText');
   var nameTag=document.getElementById('nameTag');
+  var sndBtn=document.getElementById('sndBtn');
   var tip=document.getElementById('tip');
   var sleepBtn=null;
 
   var state={name:'松松',mood:80,view:0,x:0.6,y:0.52,lastSeen:Date.now()};
-  var sleepTimer=null, bubbleTimer=null, idleTimer=null, viewIdx=0, busy=false;
+  var sleepTimer=null, bubbleTimer=null, idleTimer=null, dreamTimer=null, viewIdx=0, busy=false;
+  var patCount=0, patReset=null;
+  var soundOn=true;
+  try{soundOn=localStorage.getItem('pet_sound')!=='0';}catch(e){}
+
+  /* ---------- 音效 ---------- */
+  var AC=null;
+  function ensureAC(){
+    if(!AC){var C=window.AudioContext||window.webkitAudioContext;if(C){try{AC=new C();}catch(e){}}}
+    if(AC&&AC.state==='suspended')AC.resume();
+  }
+  function beep(freq,dur,type,vol,delay){
+    if(!soundOn)return;ensureAC();if(!AC)return;
+    var t=AC.currentTime+(delay||0);
+    var o=AC.createOscillator(),g=AC.createGain();
+    o.type=type||'sine';o.frequency.setValueAtTime(freq,t);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.001,vol||0.15),t+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g);g.connect(AC.destination);
+    o.start(t);o.stop(t+dur+0.06);
+  }
+  function renderSnd(){sndBtn.textContent=soundOn?'🔊':'🔇';}
+  sndBtn.addEventListener('click',function(){
+    soundOn=!soundOn;renderSnd();
+    try{localStorage.setItem('pet_sound',soundOn?'1':'0');}catch(e){}
+    if(soundOn)beep(660,0.08,'sine',0.12);
+  });
+  renderSnd();
+  document.addEventListener('pointerdown',function(){ensureAC();});
 
   /* ---------- 初始化 ---------- */
   function load(){
@@ -251,7 +302,7 @@ body{
     state.x=(window.innerWidth-w>0)?L/(window.innerWidth-w):0.6;
     state.y=(window.innerHeight-h>0)?T/(window.innerHeight-h):0.5;
   }
-  function goHome(){wake();place(0.6,0.52,true);save();setTimeout(function(){wrap.style.transition='none';},750);}
+  function goHome(){wake();place(0.6,0.52,true);save();beep(400,0.15,'sine',0.08);beep(500,0.15,'sine',0.08,0.15);setTimeout(function(){wrap.style.transition='none';},750);}
 
   /* ---------- 心情 ---------- */
   function renderMood(){
@@ -286,15 +337,23 @@ body{
   }
 
   /* ---------- 状态切换 ---------- */
-  function clearAnim(){['idle','walk','dance','eat','sleep','happy','jump','stretch','look','spin'].forEach(function(c){pet.classList.remove(c);});}
+  function clearAnim(){['idle','walk','dance','eat','sleep','happy','jump','stretch','look','spin','angry'].forEach(function(c){pet.classList.remove(c);});}
   function wake(){
     if(pet.classList.contains('sleep')){
-      pet.classList.remove('sleep');
+      pet.classList.remove('sleep');stopDream();
       if(sleepBtn){sleepBtn.classList.remove('active');sleepBtn.querySelector('i').textContent='😴';sleepBtn.querySelector('em').textContent='睡觉';}
       if(sleepTimer){clearInterval(sleepTimer);sleepTimer=null;}
       pet.classList.add('idle');
     }
   }
+
+  /* ---------- 梦境 ---------- */
+  function startDream(){
+    dream.textContent=DREAM[0];var di=0;
+    dream.classList.add('show');
+    dreamTimer=setInterval(function(){di=(di+1)%DREAM.length;dream.textContent=DREAM[di];},1500);
+  }
+  function stopDream(){dream.classList.remove('show');if(dreamTimer){clearInterval(dreamTimer);dreamTimer=null;}}
 
   /* ---------- 散步 ---------- */
   function walkTo(px,py){
@@ -307,7 +366,7 @@ body{
     clearAnim();pet.classList.add('walk');
     wrap.style.transition='left 1.6s ease-in-out,top 1.6s ease-in-out';
     wrap.style.left=pos.L+'px';wrap.style.top=pos.T+'px';
-    var dust=setInterval(spawnDust,300);
+    var dust=setInterval(function(){spawnDust();beep(170,0.035,'square',0.03);},300);
     setTimeout(function(){
       clearInterval(dust);
       wrap.style.transition='none';
@@ -336,6 +395,7 @@ body{
     wake();
     clearAnim();pet.classList.add('eat');
     spawn(randomOf(FOODS),'fall');
+    beep(500,0.09,'square',0.1);beep(650,0.09,'square',0.1,0.12);beep(820,0.12,'square',0.1,0.24);
     setTimeout(function(){
       clearAnim();pet.classList.add('idle');
       setMood(15);hearts(3);
@@ -347,6 +407,7 @@ body{
     wake();
     clearAnim();pet.classList.add('dance');
     for(var i=0;i<5;i++){(function(i){setTimeout(function(){spawn(randomOf(NOTES),'note');},i*250);})(i);}
+    [523,659,784,659].forEach(function(f,i){beep(f,0.12,'triangle',0.08,i*0.15);});
     setMood(4);
     say('啦啦啦～转圈圈！',2000);
     var vi=viewIdx;
@@ -357,20 +418,26 @@ body{
       setView(FRONT);
     },2400);
   }
-  function actTalk(){wake();say(randomOf(PHRASES),2800);}
+  function actTalk(){wake();beep(880,0.05,'triangle',0.07);say(randomOf(PHRASES),2800);}
   function actSleep(){
     if(pet.classList.contains('sleep')){wake();say('睡醒啦～元气满满！');return;}
     clearAnim();pet.classList.add('sleep');
+    beep(330,0.6,'sine',0.06);beep(262,0.8,'sine',0.05,0.4);
     sleepBtn.classList.add('active');
     sleepBtn.querySelector('i').textContent='💤';sleepBtn.querySelector('em').textContent='起床';
     say('呼…呼…Zzz',2600);
+    startDream();
     var n=0;
-    sleepTimer=setInterval(function(){spawn('💤','up');n++;if(n%3===0)setMood(1);},1200);
+    sleepTimer=setInterval(function(){
+      if(n%3===0)spawn(randomOf(['💤','🌙','⭐']),'up');
+      n++;if(n%3===0)setMood(1);
+    },1200);
   }
   function actView(){
     wake();
     setView(viewIdx+1);
     clearAnim();pet.classList.add('spin');
+    beep(300,0.3,'sawtooth',0.04);beep(180,0.3,'sawtooth',0.04,0.15);
     setTimeout(function(){clearAnim();pet.classList.add('idle');},1100);
     say('现在是'+VIEW_NAME[viewIdx]+'～',1600);
   }
@@ -378,6 +445,7 @@ body{
     wake();
     clearAnim();pet.classList.add('jump');
     spawn('✨','up');
+    beep(300,0.15,'sine',0.08);beep(520,0.12,'sine',0.08,0.12);
     setTimeout(function(){clearAnim();pet.classList.add('idle');},900);
   }
   function actStretch(){
@@ -386,21 +454,47 @@ body{
   }
   function actLook(){
     clearAnim();pet.classList.add('look');
+    beep(700,0.06,'triangle',0.05);
     say('嗯？你在做什么呀~',1800);
     setTimeout(function(){clearAnim();pet.classList.add('idle');},1800);
   }
   function actAutoTurn(){
     clearAnim();pet.classList.add('spin');
-    var vi=viewIdx;var steps=0;
-    var st=setInterval(function(){vi=(vi+1)%3;setView(vi);steps++;},350);
+    beep(300,0.3,'sawtooth',0.04);
+    var vi=viewIdx;
+    var st=setInterval(function(){vi=(vi+1)%3;setView(vi);},350);
     setTimeout(function(){clearInterval(st);clearAnim();pet.classList.add('idle');setView(FRONT);},1200);
   }
+
+  /* ---------- 摸头 / 连点 ---------- */
   function actPat(){
     wake();
+    patCount++;clearTimeout(patReset);
+    patReset=setTimeout(function(){patCount=0;},1500);
+    if(patCount>=7){actAngry();return;}
+    if(patCount>=4){actDizzy();return;}
+    beep(420,0.06,'sine',0.1);
     clearAnim();pet.classList.add('happy');
     setTimeout(function(){clearAnim();pet.classList.add('idle');},500);
     hearts(4);setMood(2);
     say(randomOf(PHRASES),2400);
+  }
+  function actDizzy(){
+    patCount=0;clearTimeout(patReset);
+    clearAnim();pet.classList.add('spin');
+    for(var i=0;i<4;i++){(function(i){setTimeout(function(){spawn('💫','up');},i*180);})(i);}
+    beep(500,0.5,'sawtooth',0.06);
+    say('哎呀…转晕啦～😵',2200);
+    setTimeout(function(){clearAnim();pet.classList.add('idle');},1300);
+  }
+  function actAngry(){
+    patCount=0;clearTimeout(patReset);
+    clearAnim();pet.classList.add('angry');
+    spawn('💢','up');setTimeout(function(){spawn('💢','up');},200);
+    beep(120,0.3,'square',0.08);beep(100,0.3,'square',0.08,0.2);
+    setMood(-2);
+    say('哼！再点我真的生气啦！😤',2600);
+    setTimeout(function(){clearAnim();pet.classList.add('idle');},2200);
   }
 
   /* ---------- 待机随机动作 ---------- */
@@ -451,7 +545,7 @@ body{
   /* ---------- 改名 ---------- */
   nameTag.addEventListener('click',function(){
     var n=prompt('给我的宠物起个名字吧～',state.name);
-    if(n&&n.trim()){state.name=n.trim().slice(0,8);nameText.textContent=state.name;save();say('我叫'+state.name+'啦～');}
+    if(n&&n.trim()){state.name=n.trim().slice(0,8);nameText.textContent=state.name;save();beep(500,0.1,'sine',0.1);say('我叫'+state.name+'啦～');}
   });
 
   /* ---------- 按钮 ---------- */
@@ -465,9 +559,9 @@ body{
   });
 
   /* ---------- 提示 & 开场 ---------- */
-  setTimeout(function(){tip.classList.add('hide');},8000);
+  setTimeout(function(){tip.classList.add('hide');},9000);
   var first=!localStorage.getItem(KEY);
-  if(first){setTimeout(function(){say('你好呀，我是'+state.name+'～ 点地面我可以走过去，点「散步」到处转转吧！',5000);},600);}
+  if(first){setTimeout(function(){say('你好呀，我是'+state.name+'～ 点地面我可以走过去，连点我会有小情绪哦！',5000);},600);}
 
   /* ---------- 保存 & 定时器 ---------- */
   window.addEventListener('beforeunload',save);
